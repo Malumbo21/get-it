@@ -35,7 +35,10 @@ export type Tag = {
   fontHeight: number;
   type: VizType;
   label: string;
+  /** Spec arrived — clicking opens the visualization. */
   ready: boolean;
+  /** Currently fetching the spec — show spinner, disable click. */
+  generating: boolean;
 };
 
 type Props = {
@@ -205,6 +208,23 @@ function PdfPage({
           const left = t.endX * scale + 4;
           const top = (pdfHeight - t.endY - t.fontHeight * 0.85) * scale - 1;
           const isActive = activeTagId === t.id;
+          // Three states: ready (clickable, colored), generating (disabled,
+          // spinner), idle (clickable in manual mode — colored but lighter).
+          const isIdle = !t.ready && !t.generating;
+          const clickable = t.ready || isIdle;
+          let baseClass: string;
+          let title: string;
+          if (t.ready) {
+            baseClass = `bg-gradient-to-br ${TYPE_COLORS[t.type]} text-white ring-white/40 hover:scale-105 hover:shadow-lg cursor-pointer`;
+            title = t.label;
+          } else if (t.generating) {
+            baseClass = "cursor-wait bg-slate-200 text-slate-500 ring-slate-300";
+            title = "preparing visualization…";
+          } else {
+            // Idle / manual mode — clickable but visually softer.
+            baseClass = `bg-gradient-to-br ${TYPE_COLORS[t.type]} text-white/90 ring-white/30 opacity-75 hover:opacity-100 hover:scale-105 hover:shadow-lg cursor-pointer`;
+            title = `Click to generate visualization for "${t.label}"`;
+          }
           return (
             <motion.button
               key={t.id}
@@ -212,24 +232,22 @@ function PdfPage({
               animate={{ opacity: 1, y: 0, scale: 1 }}
               transition={{ duration: 0.25 }}
               type="button"
-              disabled={!t.ready}
+              disabled={!clickable}
               onClick={() => onTagClick(t.id)}
               style={{ left, top }}
               className={[
                 "pointer-events-auto absolute -translate-y-0.5 inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-medium leading-none shadow-md ring-1 transition-all",
-                t.ready
-                  ? `bg-gradient-to-br ${TYPE_COLORS[t.type]} text-white ring-white/40 hover:scale-105 hover:shadow-lg cursor-pointer`
-                  : "cursor-wait bg-slate-200 text-slate-500 ring-slate-300",
-                isActive && "scale-110 ring-2 ring-white",
+                baseClass,
+                isActive && "scale-110 ring-2 ring-white opacity-100",
               ]
                 .filter(Boolean)
                 .join(" ")}
-              title={t.ready ? t.label : "preparing visualization…"}
+              title={title}
             >
-              {t.ready ? (
-                <Icon className="h-2.5 w-2.5" />
-              ) : (
+              {t.generating ? (
                 <Loader2 className="h-2.5 w-2.5 animate-spin" />
+              ) : (
+                <Icon className="h-2.5 w-2.5" />
               )}
               <span className="max-w-[160px] truncate">{t.label}</span>
             </motion.button>

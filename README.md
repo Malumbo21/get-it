@@ -22,9 +22,24 @@ Pre-requisites:
 
 ```bash
 npm install
+cp .env.example .env    # tweak NEXT_PUBLIC_AUTO_GENERATE_VIZ if needed
 npm run generate-pdfs   # one-time: build the 5 sample PDFs into public/pdfs
 npm run dev             # http://localhost:3000
 ```
+
+### Auto vs manual generation
+
+`NEXT_PUBLIC_AUTO_GENERATE_VIZ` controls whether the visualizer eagerly
+generates a spec for every detected tag, or waits for a click:
+
+- **unset / `true`** — production behavior: every tag fires its viz
+  generation in parallel (capped at 4 concurrent), the user sees the
+  right pane fill in by itself.
+- **`false`** — dev behavior: tags appear but no codex token is spent
+  until the user clicks a tag. A small "manual mode" chip shows up in
+  the viewer header. Use this when iterating on the UI.
+
+---
 
 Open the home page, drop a PDF (or click any of the 5 sample documents),
 and watch tags appear inline as the agent reads each page. Tags pulse

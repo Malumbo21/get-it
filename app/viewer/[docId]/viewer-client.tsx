@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, FileText, RefreshCw, AlertCircle } from "lucide-react";
+import { ArrowLeft, FileText, RefreshCw, AlertCircle, MousePointerClick } from "lucide-react";
 import { motion } from "framer-motion";
 
 import PdfViewer, { type Tag } from "@/components/PdfViewer";
 import Visualizer from "@/components/Visualizer";
 import type { DetectedConcept, VizSpec, VizType } from "@/lib/schemas";
+import { AUTO_GENERATE_VIZ } from "@/lib/config";
 
 const MAX_CONCURRENT_VIZ_GEN = 4;
 
@@ -78,76 +79,104 @@ export default function ViewerClient({ docId }: { docId: string }) {
     [meta],
   );
 
-  // ── Page-by-page concept detection + queued viz generation ───────────
+  // ── Refs that survive re-renders for the orchestration plumbing ──────
   const analyzedRef = useRef<Set<number>>(new Set());
   const vizQueueRef = useRef<TagState[]>([]);
   const vizInflightRef = useRef(0);
+  // Tracks tag IDs that are currently queued OR inflight, so we never
+  // double-enqueue a manual click.
+  const enqueuedRef = useRef<Set<string>>(new Set());
+  const ctrlsRef = useRef<AbortController[]>([]);
+  const cancelledRef = useRef(false);
 
+  // ── Helpers ──────────────────────────────────────────────────────────
+  const pumpVizQueue = useCallback(() => {
+    while (
+      vizInflightRef.current < MAX_CONCURRENT_VIZ_GEN &&
+      vizQueueRef.current.length
+    ) {
+      const next = vizQueueRef.current.shift()!;
+      vizInflightRef.current++;
+      const ctrl = new AbortController();
+      ctrlsRef.current.push(ctrl);
+      fetch("/api/generate-viz", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          type: next.type,
+          label: next.concept.label,
+          context: next.concept.context,
+          docTitle,
+        }),
+        signal: ctrl.signal,
+      })
+        .then(async (r) => {
+          if (!r.ok) {
+            const txt = await r.text().catch(() => "");
+            throw new Error(`generate-viz ${r.status}: ${txt.slice(0, 200)}`);
+          }
+          return (await r.json()) as VizSpec;
+        })
+        .then((spec) => {
+          if (cancelledRef.current) return;
+          setTags((prev) =>
+            prev.map((t) =>
+              t.id === next.id ? { ...t, spec, ready: true, generating: false } : t,
+            ),
+          );
+        })
+        .catch((e) => {
+          if (
+            cancelledRef.current ||
+            ctrl.signal.aborted ||
+            (e as Error).name === "AbortError" ||
+            ((e as Error).message || "").includes("Failed to fetch")
+          ) {
+            return;
+          }
+          console.error("viz generation error for", next.label, e);
+          setTags((prev) =>
+            prev.map((t) =>
+              t.id === next.id
+                ? { ...t, error: (e as Error).message, ready: false, generating: false }
+                : t,
+            ),
+          );
+        })
+        .finally(() => {
+          enqueuedRef.current.delete(next.id);
+          vizInflightRef.current--;
+          if (!cancelledRef.current) pumpVizQueue();
+        });
+    }
+  }, [docTitle]);
+
+  const enqueueTagForGen = useCallback(
+    (tag: TagState) => {
+      if (enqueuedRef.current.has(tag.id)) return;
+      if (tag.spec || tag.error) return;
+      enqueuedRef.current.add(tag.id);
+      vizQueueRef.current.push(tag);
+      // Mark the tag as generating so the pill shows the spinner.
+      setTags((prev) =>
+        prev.map((t) => (t.id === tag.id ? { ...t, generating: true } : t)),
+      );
+      pumpVizQueue();
+    },
+    [pumpVizQueue],
+  );
+
+  // ── Page-by-page concept detection ───────────────────────────────────
   useEffect(() => {
     if (!meta) return;
-    let cancelled = false;
-    const ctrls: AbortController[] = [];
-
-    function pumpVizQueue() {
-      while (vizInflightRef.current < MAX_CONCURRENT_VIZ_GEN && vizQueueRef.current.length) {
-        const next = vizQueueRef.current.shift()!;
-        vizInflightRef.current++;
-        const ctrl = new AbortController();
-        ctrls.push(ctrl);
-        fetch("/api/generate-viz", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            type: next.type,
-            label: next.concept.label,
-            context: next.concept.context,
-            docTitle,
-          }),
-          signal: ctrl.signal,
-        })
-          .then(async (r) => {
-            if (!r.ok) {
-              const txt = await r.text().catch(() => "");
-              throw new Error(`generate-viz ${r.status}: ${txt.slice(0, 200)}`);
-            }
-            return (await r.json()) as VizSpec;
-          })
-          .then((spec) => {
-            if (cancelled) return;
-            setTags((prev) =>
-              prev.map((t) => (t.id === next.id ? { ...t, spec, ready: true } : t)),
-            );
-          })
-          .catch((e) => {
-            // Suppress aborts (component unmount, page navigation).
-            if (
-              cancelled ||
-              ctrl.signal.aborted ||
-              (e as Error).name === "AbortError" ||
-              ((e as Error).message || "").includes("Failed to fetch")
-            ) {
-              return;
-            }
-            console.error("viz generation error for", next.label, e);
-            setTags((prev) =>
-              prev.map((t) =>
-                t.id === next.id ? { ...t, error: (e as Error).message, ready: false } : t,
-              ),
-            );
-          })
-          .finally(() => {
-            vizInflightRef.current--;
-            if (!cancelled) pumpVizQueue();
-          });
-      }
-    }
+    cancelledRef.current = false;
 
     async function runOne(pageIndex: number) {
       if (analyzedRef.current.has(pageIndex)) return;
       analyzedRef.current.add(pageIndex);
       setPagesAnalyzing((s) => new Set(s).add(pageIndex));
       const ctrl = new AbortController();
-      ctrls.push(ctrl);
+      ctrlsRef.current.push(ctrl);
       try {
         const r = await fetch("/api/analyze-pdf", {
           method: "POST",
@@ -157,7 +186,7 @@ export default function ViewerClient({ docId }: { docId: string }) {
         });
         if (!r.ok) throw new Error(`analyze failed ${r.status}`);
         const j = (await r.json()) as AnalyzeResult;
-        if (cancelled) return;
+        if (cancelledRef.current) return;
         const newTags: TagState[] = j.concepts
           .map((c, i) => {
             const a = j.anchors[i];
@@ -171,18 +200,26 @@ export default function ViewerClient({ docId }: { docId: string }) {
               type: c.type as VizType,
               label: c.label,
               ready: false,
+              generating: AUTO_GENERATE_VIZ,
               concept: c,
             };
           })
           .filter((t): t is TagState => t !== null);
         setTags((prev) => [...prev, ...newTags]);
-        vizQueueRef.current.push(...newTags);
-        pumpVizQueue();
+        // In auto mode, eagerly queue every tag for generation. In manual
+        // mode, wait for the user to click.
+        if (AUTO_GENERATE_VIZ) {
+          for (const t of newTags) {
+            enqueuedRef.current.add(t.id);
+            vizQueueRef.current.push(t);
+          }
+          pumpVizQueue();
+        }
       } catch (e) {
         if ((e as Error).name === "AbortError") return;
         console.error(`page ${pageIndex} analyze error`, e);
       } finally {
-        if (!cancelled) {
+        if (!cancelledRef.current) {
           setPagesAnalyzing((s) => {
             const n = new Set(s);
             n.delete(pageIndex);
@@ -205,13 +242,15 @@ export default function ViewerClient({ docId }: { docId: string }) {
     Promise.all(workers).catch(() => {});
 
     return () => {
-      cancelled = true;
+      cancelledRef.current = true;
       vizQueueRef.current = [];
-      ctrls.forEach((c) => {
+      enqueuedRef.current.clear();
+      ctrlsRef.current.forEach((c) => {
         try {
           c.abort();
         } catch {}
       });
+      ctrlsRef.current = [];
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meta, docId]);
@@ -220,16 +259,28 @@ export default function ViewerClient({ docId }: { docId: string }) {
   const activeSpec = activeTag?.spec ?? null;
 
   // Auto-select the first ready tag the moment it becomes ready, so the
-  // visualizer panel isn't empty when the user is waiting for tags.
+  // visualizer panel isn't empty when the user is waiting for tags. In
+  // manual mode no tag is ever auto-generated, so this naturally no-ops
+  // until the user clicks something.
   useEffect(() => {
     if (activeTagId) return;
     const firstReady = tags.find((t) => t.ready);
     if (firstReady) setActiveTagId(firstReady.id);
   }, [tags, activeTagId]);
 
-  const handleTagClick = useCallback((id: string) => {
-    setActiveTagId(id);
-  }, []);
+  const handleTagClick = useCallback(
+    (id: string) => {
+      setActiveTagId(id);
+      const tag = tags.find((t) => t.id === id);
+      if (!tag) return;
+      // In auto mode, generation is already in flight or done. In manual
+      // mode the click itself triggers generation for this specific tag.
+      if (!tag.spec && !tag.error && !tag.generating) {
+        enqueueTagForGen(tag);
+      }
+    },
+    [tags, enqueueTagForGen],
+  );
 
   if (loadError) {
     return (
@@ -258,7 +309,7 @@ export default function ViewerClient({ docId }: { docId: string }) {
   const totalPages = meta.numPages;
   const doneCount = pagesAnalyzed.size;
   const tagReadyCount = tags.filter((t) => t.ready).length;
-  const tagPendingCount = tags.length - tagReadyCount;
+  const tagGeneratingCount = tags.filter((t) => t.generating).length;
 
   return (
     <div className="flex h-screen flex-col bg-slate-950">
@@ -275,6 +326,11 @@ export default function ViewerClient({ docId }: { docId: string }) {
             <p className="truncate text-sm font-medium">{docTitle ?? meta.filename}</p>
             <span className="text-xs text-white/40">· {meta.numPages} pages</span>
           </div>
+          {!AUTO_GENERATE_VIZ && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-amber-400/30 bg-amber-400/10 px-2 py-0.5 text-[10px] uppercase tracking-wider text-amber-200">
+              <MousePointerClick className="h-3 w-3" /> manual mode
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-3 text-[11px] text-white/55">
           <ProgressChip
@@ -284,10 +340,10 @@ export default function ViewerClient({ docId }: { docId: string }) {
             spinning={detecting}
           />
           <ProgressChip
-            label="visualizations ready"
+            label={AUTO_GENERATE_VIZ ? "visualizations ready" : "tags clicked"}
             value={tagReadyCount}
-            total={tagReadyCount + tagPendingCount}
-            spinning={tagPendingCount > 0}
+            total={AUTO_GENERATE_VIZ ? tags.length : tagReadyCount + tagGeneratingCount}
+            spinning={tagGeneratingCount > 0}
           />
         </div>
       </header>
@@ -311,11 +367,13 @@ export default function ViewerClient({ docId }: { docId: string }) {
         >
           <Visualizer
             spec={activeSpec}
-            loading={activeTag != null && !activeTag.ready && !activeTag.error}
+            loading={activeTag != null && !activeTag.spec && !activeTag.error}
             emptyHint={
               tags.length === 0
                 ? "codex is reading the document — tags will appear inline as soon as they're detected."
-                : "Click any colored tag in the document to render its concept here."
+                : AUTO_GENERATE_VIZ
+                  ? "Click any colored tag in the document to render its concept here."
+                  : "Click any tag to generate its visualization. (manual mode is on — see .env)"
             }
           />
           {activeTag?.error && (
