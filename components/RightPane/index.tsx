@@ -10,7 +10,7 @@
  *   - Knowledge Graph  (concept map + evaluation scores)
  *   - Chat             (multi-turn, multi-thread Q&A)
  *   - Flashcards       (active recall decks with self-grading)
- *   - Feynman          (explain to a curious child, 4 turns)
+ *   - Feynman          (plain-language explanation questions, 4 turns)
  *
  * The Visualizer view is essentially the original component, lifted into
  * here so the chrome (mode chip + title) lives in one place.
@@ -22,7 +22,7 @@ import {
   MessageSquare,
   Layers,
   Network,
-  Baby,
+  Lightbulb,
   ChevronDown,
   MoreHorizontal,
 } from "lucide-react";
@@ -81,8 +81,8 @@ const MODES: Array<{
   {
     id: "feynman",
     label: "Feynman",
-    Icon: Baby,
-    description: "Teach the topic to a curious child",
+    Icon: Lightbulb,
+    description: "Clarify a topic through guided plain-language questions",
   },
 ];
 
