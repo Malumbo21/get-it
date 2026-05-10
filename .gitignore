@@ -12,6 +12,8 @@
 
 # testing
 /coverage
+/smoke-out
+/scripts/smoke-out
 
 # next.js
 /.next/
