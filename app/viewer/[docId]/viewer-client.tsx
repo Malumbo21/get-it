@@ -11,6 +11,8 @@ import {
   BookOpen,
   Settings2,
   RotateCcw,
+  Tag as TagIcon,
+  Network,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -642,17 +644,15 @@ export default function ViewerClient({ docId }: { docId: string }) {
           <span>Library</span>
         </div>
         <div className="ml-auto flex items-center gap-2 pr-1">
-          <ProgressChip
-            label="pages"
-            value={doneCount}
-            total={totalPages}
-            spinning={detecting}
-          />
-          <ProgressChip
-            label={autoGenerate ? "viz ready" : "clicked"}
-            value={tagReadyCount}
-            total={autoGenerate ? tags.length : tagReadyCount + tagGeneratingCount}
-            spinning={tagGeneratingCount > 0}
+          <KGStatusBadge docId={docId} />
+          <TagsChip
+            pagesDone={doneCount}
+            pagesTotal={totalPages}
+            detecting={detecting}
+            tagsReady={tagReadyCount}
+            tagsTotal={autoGenerate ? tags.length : tagReadyCount + tagGeneratingCount}
+            tagsLabel={autoGenerate ? "viz ready" : "clicked"}
+            generating={tagGeneratingCount > 0}
           />
           <button
             type="button"
@@ -719,27 +719,179 @@ export default function ViewerClient({ docId }: { docId: string }) {
   );
 }
 
-function ProgressChip({
-  label,
-  value,
-  total,
-  spinning,
+/** Merged badge for the page-detection + per-tag generation progress. The
+ *  tag icon makes it obvious this is the document-tag pipeline; the two
+ *  pairs are separated by a faint pipe so the eye can scan them as one
+ *  surface. Spins whenever either side is in flight. */
+function TagsChip({
+  pagesDone,
+  pagesTotal,
+  detecting,
+  tagsReady,
+  tagsTotal,
+  tagsLabel,
+  generating,
 }: {
-  label: string;
-  value: number;
-  total: number;
-  spinning?: boolean;
+  pagesDone: number;
+  pagesTotal: number;
+  detecting: boolean;
+  tagsReady: number;
+  tagsTotal: number;
+  tagsLabel: string;
+  generating: boolean;
 }) {
+  const spinning = detecting || generating;
   return (
-    <div className="flex items-center gap-1.5 rounded-md border border-[var(--border-subtle)] bg-white px-2 py-1 text-[11px]">
-      {spinning && <RefreshCw className="h-3 w-3 animate-spin text-[var(--accent-600)]" />}
+    <div
+      className="flex items-center gap-1.5 rounded-md border border-[var(--border-subtle)] bg-white px-2 py-1 text-[11px]"
+      title="Pages detected · concept tags generated"
+    >
+      {spinning ? (
+        <RefreshCw className="h-3 w-3 animate-spin text-[var(--accent-600)]" />
+      ) : (
+        <TagIcon className="h-3 w-3 text-[var(--ink-400)]" />
+      )}
       <span className="tabular-nums font-medium text-[var(--ink-900)]">
-        {value}
-        <span className="font-normal text-[var(--ink-400)]">/{total}</span>
+        {pagesDone}
+        <span className="font-normal text-[var(--ink-400)]">/{pagesTotal}</span>
       </span>
-      <span className="text-[var(--ink-500)]">{label}</span>
+      <span className="text-[var(--ink-500)]">pages</span>
+      <span className="px-0.5 text-[var(--ink-300)]" aria-hidden>
+        |
+      </span>
+      <span className="tabular-nums font-medium text-[var(--ink-900)]">
+        {tagsReady}
+        <span className="font-normal text-[var(--ink-400)]">/{tagsTotal}</span>
+      </span>
+      <span className="text-[var(--ink-500)]">{tagsLabel}</span>
     </div>
   );
+}
+
+/** Compact status badge for the knowledge-graph evaluator agent. Polls
+ *  /api/kg/[docId]/state every 6 s and renders one of:
+ *    • "Building graph"        — initial concept extraction in flight
+ *    • "Graph error"           — build failed (rare)
+ *    • "Evaluating"            — evaluator pass currently running
+ *    • "No evaluations yet"    — graph ready, no interactions yet
+ *    • "Synced <relative>"     — last successful evaluator pass
+ *  Independent of the KG view's own poll: when the user is on a different
+ *  right-pane mode this is the only thing keeping the badge fresh. */
+function KGStatusBadge({ docId }: { docId: string }) {
+  const [state, setState] = useState<{
+    status: "missing" | "building" | "ready" | "error";
+    evaluating: boolean;
+    evaluationCount: number;
+    lastEvaluatedAt: number | null;
+    buildError?: string;
+  } | null>(null);
+  // Tick once a second so "X seconds ago" doesn't lag.
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    let tries = 0;
+    const fetchOnce = async () => {
+      try {
+        const r = await fetch(`/api/kg/${docId}/state`, { cache: "no-store" });
+        if (!r.ok) throw new Error(String(r.status));
+        const j = (await r.json()) as {
+          status: "missing" | "building" | "ready" | "error";
+          evaluating?: boolean;
+          evaluationCount: number;
+          lastEvaluatedAt: number | null;
+          buildError?: string;
+        };
+        if (cancelled) return;
+        tries = 0;
+        setState({
+          status: j.status,
+          evaluating: !!j.evaluating,
+          evaluationCount: j.evaluationCount,
+          lastEvaluatedAt: j.lastEvaluatedAt,
+          buildError: j.buildError,
+        });
+      } catch {
+        tries++;
+      }
+    };
+    fetchOnce();
+    // Faster cadence while the agent is actively working; slow down when idle.
+    const id = setInterval(
+      () => {
+        fetchOnce();
+      },
+      state && (state.status === "building" || state.evaluating) ? 2500 : 6000,
+    );
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docId, state?.status, state?.evaluating]);
+
+  // Re-render once a second so the relative time stays current.
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  if (!state) return null;
+
+  let icon: React.ReactNode;
+  let label: string;
+  let tone = "text-[var(--ink-500)]";
+  let valueTone = "text-[var(--ink-900)]";
+  let title = "";
+
+  if (state.status === "building") {
+    icon = <RefreshCw className="h-3 w-3 animate-spin text-[var(--accent-600)]" />;
+    label = "Building graph";
+    title = "Knowledge-graph agent is extracting concepts from the document";
+  } else if (state.status === "error") {
+    icon = <AlertCircle className="h-3 w-3 text-rose-500" />;
+    label = "Graph error";
+    valueTone = "text-rose-700";
+    title = state.buildError ?? "Graph build failed";
+  } else if (state.evaluating) {
+    icon = <RefreshCw className="h-3 w-3 animate-spin text-[var(--accent-600)]" />;
+    label = "Evaluating";
+    title = "Evaluator is re-scoring concepts based on your latest interaction";
+  } else if (state.status === "ready" && state.evaluationCount === 0) {
+    icon = <Network className="h-3 w-3 text-[var(--ink-400)]" />;
+    label = "No evaluations yet";
+    tone = "text-[var(--ink-500)]";
+    title = "Interact with chat / flashcards / feynman to start the evaluator";
+  } else if (state.status === "ready" && state.lastEvaluatedAt) {
+    icon = <Network className="h-3 w-3 text-emerald-600" />;
+    label = `Synced ${humaniseAgo(state.lastEvaluatedAt)}`;
+    title = `${state.evaluationCount} evaluation${state.evaluationCount === 1 ? "" : "s"} so far`;
+  } else {
+    // status === "missing" — viewer hasn't kicked the build yet.
+    icon = <Network className="h-3 w-3 text-[var(--ink-400)]" />;
+    label = "Graph pending";
+    title = "Waiting to build the knowledge graph";
+  }
+
+  return (
+    <div
+      className="flex items-center gap-1.5 rounded-md border border-[var(--border-subtle)] bg-white px-2 py-1 text-[11px]"
+      title={title}
+    >
+      {icon}
+      <span className={`font-medium ${valueTone}`}>{label.split(" ")[0]}</span>
+      <span className={tone}>{label.split(" ").slice(1).join(" ")}</span>
+    </div>
+  );
+}
+
+function humaniseAgo(ts: number): string {
+  const dt = Date.now() - ts;
+  if (dt < 5_000) return "just now";
+  if (dt < 60_000) return `${Math.round(dt / 1000)}s ago`;
+  if (dt < 3_600_000) return `${Math.round(dt / 60_000)}m ago`;
+  if (dt < 86_400_000) return `${Math.round(dt / 3_600_000)}h ago`;
+  return `${Math.round(dt / 86_400_000)}d ago`;
 }
 
 function SettingsMenu({

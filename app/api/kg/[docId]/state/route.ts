@@ -8,6 +8,7 @@
 import { NextResponse } from "next/server";
 import { emptyKG, loadKG } from "@/lib/kg";
 import { getDoc } from "@/lib/store";
+import { isEvaluating } from "@/lib/kg-runner";
 
 export const runtime = "nodejs";
 
@@ -20,5 +21,5 @@ export async function GET(
     return NextResponse.json({ error: "doc not found" }, { status: 404 });
   }
   const kg = loadKG(docId) ?? emptyKG(docId);
-  return NextResponse.json(kg);
+  return NextResponse.json({ ...kg, evaluating: isEvaluating(docId) });
 }

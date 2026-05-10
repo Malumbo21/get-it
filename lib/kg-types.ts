@@ -45,6 +45,9 @@ export type KnowledgeGraph = {
   edges: KGEdge[];
   globalNote: string;
   buildError?: string;
+  /** Response-only flag set by GET /api/kg/[docId]/state when an evaluator
+   *  pass is in flight. Not persisted to disk. */
+  evaluating?: boolean;
 };
 
 /** Map an evaluation to a single 0–100 mastery score for UI display. */
