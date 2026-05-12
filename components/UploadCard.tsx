@@ -122,7 +122,7 @@ export default function UploadCard() {
       <h1 className="text-balance text-[44px] font-bold leading-[1.08] tracking-tight text-[var(--ink-900)]">
         Read it. See it.{" "}
         <span
-          className="font-black tracking-[-0.02em] text-[var(--accent-600)]"
+          className="font-black tracking-[-0.02em]"
           style={{ fontSize: "1.28em" }}
         >
           Get It.
