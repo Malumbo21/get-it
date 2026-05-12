@@ -122,14 +122,18 @@ The full architecture is in [`technical-writeup.md`](technical-writeup.md) (also
 git clone https://github.com/beltromatti/get-it.git
 cd get-it
 npm install
-npm run electron:dev          # runs Next dev + opens the Electron window
+npm run electron:dev          # builds + opens the packaged Electron app
 ```
 
-Or run just the Next side and open it in your browser:
+`electron:dev` builds the Next.js standalone bundle and runs it inside Electron — that's the loop the end user gets, and the one that exercises the setup wizard, the embedded server, and the IPC bridge. Re-run it after edits.
+
+If you prefer browser-side hot reload, run Next on its own and open it in Chrome / Safari:
 
 ```bash
 npm run dev                   # http://localhost:3000
 ```
+
+(Heads up: there's a known Next 16.2.6 + Turbopack + Chromium 130 hydration glitch that breaks `next dev` *inside* Electron — the WebSocket HMR handshake fails and React never hydrates. So we don't recommend `electron:dev:hmr` for day-to-day work. Browser dev or rebuild-and-test is the cleaner loop.)
 
 To make a desktop build locally for one or all targets:
 
