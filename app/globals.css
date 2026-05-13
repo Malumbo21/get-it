@@ -57,6 +57,11 @@ body {
   font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  /* Never let the page scroll horizontally. Content must fit the
+     viewport — narrow children that would push past the edge get
+     clipped at the body, individual scrollable regions still scroll
+     vertically as set by their own classes. */
+  overflow-x: hidden;
 }
 
 /* Scrollbars — neutral, almost invisible */
@@ -79,7 +84,9 @@ body {
   border-radius: 14px;
 }
 
-/* Reflect-style top-bar tab (browser-tab look, not button) */
+/* Reflect-style top-bar tab (browser-tab look, not button).
+   Doubles as the Electron window's drag region — children that are
+   interactive opt back out via `-webkit-app-region: no-drag` below. */
 .tab-bar {
   display: flex;
   align-items: center;
@@ -87,6 +94,35 @@ body {
   padding: 6px 8px 0 8px;
   background: var(--surface-canvas);
   border-bottom: 1px solid var(--border-subtle);
+  -webkit-app-region: drag;
+  app-region: drag;
+  user-select: none;
+}
+/* macOS: traffic-light buttons (close / min / max) float over the
+   top-left of the window thanks to titleBarStyle=hiddenInset. Push
+   the tab-bar's leading content past them so they don't overlap the
+   Back chip / Upload tab. */
+html[data-platform="darwin"] .tab-bar {
+  padding-left: 78px;
+}
+/* Windows: titleBarOverlay paints minimise/maximise/close on the
+   top-right inside our chrome. Reserve a strip so the Settings /
+   Account icons aren't covered. */
+html[data-platform="win32"] .tab-bar {
+  padding-right: 140px;
+}
+
+/* Everything interactive inside the tab-bar opts out of the drag
+   region — buttons, links, the cog popover etc. all need pointer
+   events. Keep this rule broad so a new child component dropped
+   into the bar doesn't accidentally become un-clickable. */
+.tab-bar a,
+.tab-bar button,
+.tab-bar input,
+.tab-bar [role="button"],
+.tab-bar .viz-tooltip-anchor {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
 }
 .tab-item {
   display: inline-flex;

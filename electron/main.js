@@ -277,6 +277,8 @@ function stopEmbeddedServer() {
 let mainWindow = null;
 
 function createMainWindow() {
+  const isMac = process.platform === "darwin";
+  const isWin = process.platform === "win32";
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
@@ -285,6 +287,26 @@ function createMainWindow() {
     title: "Get It.",
     backgroundColor: "#ffffff",
     show: false,
+    // Modern integrated title bar: the app's top tab-bar becomes the
+    // drag region, and platform-native window controls are inset into
+    // its leading (macOS) or trailing (Windows) edge.
+    //   • macOS: "hiddenInset" hides the native title strip but keeps
+    //     the traffic-light buttons floating over our chrome. We nudge
+    //     them down a couple of pixels so they vertically center with
+    //     the tab-bar's chips.
+    //   • Windows: "hidden" + titleBarOverlay draws minimise/maximise/
+    //     close as system controls inside a 36-px strip we leave clear
+    //     on the right side of the tab-bar.
+    //   • Linux: leave the system frame on — GTK/KDE compositors don't
+    //     support titleBarOverlay yet and a custom-button fallback
+    //     would feel out of place next to native windows. The tab-bar
+    //     still sits at the very top, the OS just paints its own
+    //     decoration above it.
+    titleBarStyle: isMac ? "hiddenInset" : isWin ? "hidden" : "default",
+    titleBarOverlay: isWin
+      ? { color: "#ffffff", symbolColor: "#111113", height: 36 }
+      : undefined,
+    trafficLightPosition: isMac ? { x: 14, y: 14 } : undefined,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,

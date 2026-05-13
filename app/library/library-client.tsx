@@ -171,7 +171,7 @@ export default function LibraryClient() {
       </div>
 
       {/* Content */}
-      <div className="relative flex-1 overflow-y-auto bg-[var(--surface-raised)]">
+      <div className="relative flex-1 overflow-y-auto overflow-x-hidden bg-[var(--surface-raised)]">
         <div className="mx-auto w-full max-w-4xl px-10 py-12">
           <h1 className="text-[34px] font-bold leading-[1.1] tracking-tight text-[var(--ink-900)]">
             Your library

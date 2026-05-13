@@ -57,7 +57,7 @@ export default function Home() {
       </div>
 
       {/* White content sheet */}
-      <div className="relative flex-1 overflow-hidden bg-[var(--surface-raised)]">
+      <div className="relative flex-1 overflow-y-auto overflow-x-hidden bg-[var(--surface-raised)]">
         <div
           aria-hidden
           className="pointer-events-none absolute inset-0 hidden select-none lg:block"
