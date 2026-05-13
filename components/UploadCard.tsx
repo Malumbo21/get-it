@@ -168,8 +168,9 @@ export default function UploadCard() {
       </h1>
 
       <p className="mt-7 max-w-2xl text-[15px] leading-[1.65] text-[var(--ink-700)]">
-        Upload any PDF. Our agent finds what&apos;s worth visualizing and
-        renders it inline — 3D, simulations, formulas, graphs, sources.
+        Drop a PDF. Chat with it, drill yourself on it, explain it back to a
+        curious eight-year-old. Watch a map of what you actually understand
+        grow — concept by concept, not page by page.
       </p>
 
       {/* Drop zone — output-type badges + CTA button */}
