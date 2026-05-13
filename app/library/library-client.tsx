@@ -22,6 +22,7 @@ import {
   Loader2,
   Network,
   RefreshCw,
+  Tag as TagIcon,
   Trash2,
   Upload,
 } from "lucide-react";
@@ -34,6 +35,9 @@ type LibraryRow = {
   lastActivityAt: number;
   kgStatus: "missing" | "building" | "ready" | "error";
   kgEvaluationCount: number;
+  tagsAnalyzedPages: number | null;
+  tagsTotal: number | null;
+  tagsReady: number | null;
 };
 
 const FILENAME_TO_TITLE: Record<string, string> = {
@@ -227,7 +231,15 @@ function LibraryRowItem({
             {row.filename} · {row.numPages} page{row.numPages === 1 ? "" : "s"} · last opened {humaniseAgo(row.lastActivityAt)}
           </p>
         </div>
-        <KGBadge status={row.kgStatus} evals={row.kgEvaluationCount} />
+        <div className="flex shrink-0 items-center gap-1.5">
+          <TagsBadge
+            analyzedPages={row.tagsAnalyzedPages}
+            numPages={row.numPages}
+            tagsReady={row.tagsReady}
+            tagsTotal={row.tagsTotal}
+          />
+          <KGBadge status={row.kgStatus} evals={row.kgEvaluationCount} />
+        </div>
       </Link>
       <button
         type="button"
@@ -247,6 +259,68 @@ function LibraryRowItem({
         )}
       </button>
     </li>
+  );
+}
+
+/**
+ * Two-phase tag-progress pill, mirroring the viewer's top-bar TagsChip.
+ *
+ *   • Doc never opened in the viewer (tagsTotal == null) → "no tags yet"
+ *     in neutral grey.
+ *   • Detection still running (analyzedPages < numPages) → "N/total
+ *     pages" in neutral grey with a spinner.
+ *   • Detection done → "N/total viz" in emerald when every tag has
+ *     a ready visualization, otherwise neutral grey.
+ *
+ * Same compact pill style as KGBadge so the two read as a pair.
+ */
+function TagsBadge({
+  analyzedPages,
+  numPages,
+  tagsReady,
+  tagsTotal,
+}: {
+  analyzedPages: number | null;
+  numPages: number;
+  tagsReady: number | null;
+  tagsTotal: number | null;
+}) {
+  if (analyzedPages == null || tagsTotal == null || tagsReady == null) {
+    return (
+      <span
+        title="Open this PDF to start tagging concepts"
+        className="hidden shrink-0 items-center gap-1.5 rounded-md border border-[var(--border-subtle)] bg-white px-2 py-1 text-[10.5px] text-[var(--ink-500)] sm:inline-flex"
+      >
+        <TagIcon className="h-3 w-3" />
+        no tags yet
+      </span>
+    );
+  }
+  const detectionDone = analyzedPages >= numPages && numPages > 0;
+  if (!detectionDone) {
+    return (
+      <span
+        title={`Tag detection in progress — ${analyzedPages} of ${numPages} pages scanned`}
+        className="hidden shrink-0 items-center gap-1.5 rounded-md border border-[var(--border-subtle)] bg-white px-2 py-1 text-[10.5px] text-[var(--ink-500)] sm:inline-flex"
+      >
+        <Loader2 className="h-3 w-3 animate-spin text-[var(--accent-600)]" />
+        {analyzedPages}/{numPages} pages
+      </span>
+    );
+  }
+  const allReady = tagsTotal > 0 && tagsReady >= tagsTotal;
+  return (
+    <span
+      title={`${tagsReady} of ${tagsTotal} visualizations ready`}
+      className={
+        allReady
+          ? "hidden shrink-0 items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10.5px] text-emerald-700 sm:inline-flex"
+          : "hidden shrink-0 items-center gap-1.5 rounded-md border border-[var(--border-subtle)] bg-white px-2 py-1 text-[10.5px] text-[var(--ink-500)] sm:inline-flex"
+      }
+    >
+      <TagIcon className="h-3 w-3" />
+      {tagsReady}/{tagsTotal} viz
+    </span>
   );
 }
 
