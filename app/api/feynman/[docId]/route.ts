@@ -88,7 +88,11 @@ function topicContext(docId: string, topic: string): string {
         .join("\n\n")
         .slice(0, 30_000)}`
     : "";
-  return `TOPIC THE STUDENT IS TEACHING: ${topic}\n\n${docPart}`;
+  const topicLine =
+    topic === "all"
+      ? "TOPIC THE STUDENT IS TEACHING: the whole document (no specific sub-topic — pick the most important thread)"
+      : `TOPIC THE STUDENT IS TEACHING: ${topic}`;
+  return `${topicLine}\n\n${docPart}`;
 }
 
 function renderTranscript(turns: FeynmanTurn[], pendingChildPrompt?: string): string {
@@ -160,8 +164,10 @@ export async function POST(
   const body = (await req.json()) as Body;
 
   if (body.action === "start") {
-    const topic = body.topic?.trim();
-    if (!topic) return NextResponse.json({ error: "topic required" }, { status: 400 });
+    // Empty topic → "all" sentinel (mirrors flashcards): the agent works
+    // over the whole document. The sidebar/header renders this as
+    // "Whole document".
+    const topic = body.topic?.trim() || "all";
     const session: FeynmanSession = {
       id: newId(),
       topic,

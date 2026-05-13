@@ -74,8 +74,8 @@ export default function FeynmanView({ docId }: Props) {
   const active = sessions?.find((s) => s.id === activeId) ?? null;
 
   const start = useCallback(async () => {
-    const t = topic.trim();
-    if (!t) return;
+    // Empty topic is allowed — the server falls back to the whole document.
+    const t = topic.trim() || "all";
     if (typeof window !== "undefined" && window.speechSynthesis) {
       try {
         const warm = new SpeechSynthesisUtterance(" ");
@@ -218,14 +218,14 @@ export default function FeynmanView({ docId }: Props) {
             type="text"
             value={topic}
             onChange={(e) => setTopic(e.target.value)}
-            placeholder="Topic to clarify"
+            placeholder="Topic, or whole doc"
             className="mb-2 w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-2 py-1.5 text-[12px] text-[var(--ink-900)] placeholder:text-[var(--ink-400)] focus:border-[var(--accent-500)] focus:outline-none"
             disabled={busy}
           />
           <button
             type="button"
             onClick={start}
-            disabled={busy || !topic.trim()}
+            disabled={busy}
             className="flex w-full items-center justify-center gap-1.5 rounded-md bg-[var(--ink-900)] py-1.5 text-[12px] font-medium text-white hover:bg-black disabled:opacity-50"
           >
             {busy ? (
@@ -302,6 +302,7 @@ function SessionListItem({
   onDelete: () => void;
 }) {
   const progress = Math.min(100, (session.turns.length / Math.max(1, maxTurns)) * 100);
+  const title = session.topic === "all" ? "Whole document" : session.topic;
 
   return (
     <div
@@ -316,9 +317,9 @@ function SessionListItem({
           type="button"
           onClick={onSelect}
           className="min-w-0 flex-1 truncate text-left font-medium"
-          title={session.topic}
+          title={title}
         >
-          {session.topic}
+          {title}
         </button>
         <span
           className={`h-2 w-2 shrink-0 rounded-full ${
@@ -371,6 +372,7 @@ function ActiveSession({
 }) {
   const ended = session.endedAt != null;
   const progress = Math.min(100, (session.turns.length / Math.max(1, maxTurns)) * 100);
+  const title = session.topic === "all" ? "Whole document" : session.topic;
 
   const feedbackParts = useMemo(() => splitFeedback(session.summary), [session.summary]);
 
@@ -381,7 +383,7 @@ function ActiveSession({
           <span className="flex min-w-0 items-center gap-2">
             <Lightbulb className="h-3.5 w-3.5 shrink-0 text-[var(--accent-600)]" />
             <span className="truncate">
-              Feynman / <strong className="font-medium text-[var(--ink-900)]">{session.topic}</strong>
+              Feynman / <strong className="font-medium text-[var(--ink-900)]">{title}</strong>
             </span>
           </span>
           <span className="shrink-0 tabular-nums">
