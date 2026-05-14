@@ -7,7 +7,7 @@
 **The study companion that turns a PDF into a measurable mastery map. Built around the document, not in place of it.**
 
 [![GDG AI Hack 2026](https://img.shields.io/badge/GDG%20AI%20Hack-Milan%202026-1a1a2e?style=for-the-badge)](https://gdg.community.dev/)
-[![Challenge: Braynr](https://img.shields.io/badge/Challenge-Braynr-6B5BFF?style=for-the-badge)](https://braynr.com)
+[![Website](https://img.shields.io/badge/Website-getit.noesisai.it-5b66f1?style=for-the-badge&logo=vercel&logoColor=white)](https://getit.noesisai.it)
 [![Built with Codex CLI](https://img.shields.io/badge/Built%20with-Codex%20CLI-111113?style=for-the-badge&logo=openai&logoColor=white)](https://github.com/openai/codex)
 
 [![Next.js](https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org)
@@ -140,6 +140,26 @@ Artefacts land in `dist-electron/`. Cross-arch builds pull the matching Codex pl
 
 Releases are tag-driven. Push a `vX.Y.Z` tag to `main` and `.github/workflows/release.yml` builds every target on a native runner, attaches the `.dmg` / `.exe` / `.AppImage` to a GitHub Release, and pins the version into Info.plist and NSIS metadata from the tag itself.
 
+## Architecture in one breath
+
+```
+upload  ─┬──► pdfjs-dist extracts text + glyph bboxes per page
+         │
+         ├──► visualizer pipeline
+         │     ├─ per-page concept-detection agent  →  DetectedConcept[] with anchor strings
+         │     └─ per-tag visualization-spec agent  →  3d / 2d-anim / formula / graph / 2d-text spec
+         │                                            (server-side syntax preflight + client-side
+         │                                             runtime repair loop on sandbox crashes)
+         │
+         └──► knowledge-graph pipeline
+               ├─ kg-build agent (one-shot)            →  6–25 concept nodes + typed edges + global note
+               └─ kg-evaluate agent (debounced)        →  per-node {memory, comprehension, structure,
+                  ◄── work-context journal                application} 0–100, monotone non-decreasing
+                  ◄── document text
+```
+
+Nine prompts behind one auth path, nine schemas behind one shared SDK wrapper. The full design rationale, the four-axis rubric, the per-doc evaluator queue, the LLM-code sandbox, and the desktop-packaging layer are in [`technical-writeup.md`](technical-writeup.md), also rendered as [PDF](technical-writeup.pdf).
+
 ## The team
 
 Built in 24 hours at **GDG AI Hack 2026, Milan**, for the **Braynr** challenge. The hackathon submission lived at commit `277ec43`. Everything past that commit is post-hackathon polish: desktop packaging, the persistent Library, the first-launch setup wizard, the quizzes tool, the in-app auto-update flow, the server-side jobs runner. The product is the same. Only the way it gets onto a student's laptop has changed.
@@ -148,10 +168,6 @@ Built in 24 hours at **GDG AI Hack 2026, Milan**, for the **Braynr** challenge. 
 - **Matteo Impieri**, Politecnico di Milano
 - **Filippo Difronzo**, Politecnico di Milano
 - **Luca Feggi**, Università di Padova
-
-## Deeper read
-
-The full architecture, design rationale, and engineering choices are in [`technical-writeup.md`](technical-writeup.md), also as [PDF](technical-writeup.pdf). It covers the agent layer, the four-axis rubric, the per-doc evaluator queue, the parallel visualizer jobs, the LLM-code sandbox, the work-context journal, the bring-your-own-account transport, and the desktop-packaging layer.
 
 ## Notice
 
