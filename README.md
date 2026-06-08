@@ -139,6 +139,10 @@ Artefacts land in `dist-electron/`. Cross-arch builds pull the matching Codex pl
 
 Releases are tag-driven. Push a `vX.Y.Z` tag to `main` and `.github/workflows/release.yml` builds every target on a native runner, attaches the `.dmg` / `.exe` / `.AppImage` to a GitHub Release, and pins the version into Info.plist and NSIS metadata from the tag itself.
 
+### Help build it
+
+Get It. is open source because the best study tool should be built in the open. We are actively looking for maintainers, contributors, designers, testers, and anyone with sharp ideas. Read **[`CONTRIBUTING.md`](CONTRIBUTING.md)** for the vision and how to get involved, then come find something to build in the **[Discord community](https://discord.gg/DpQPswRhsK)**, where we plan features, review work, and divide up tasks.
+
 ## Architecture in one breath
 
 ```
@@ -165,10 +169,10 @@ Nine prompts behind one auth path, nine schemas behind one shared SDK wrapper. T
 
 Built in 24 hours at **GDG AI Hack 2026, Milan**, for the **Braynr** challenge. The hackathon submission lived at commit `277ec43`. Everything past that commit is post-hackathon polish: desktop packaging, the persistent Library, the first-launch setup wizard, the quizzes tool, the in-app auto-update flow, the server-side jobs runner, and long-document support that keeps a 100-page PDF affordable on a single ChatGPT plan. The product is the same. Only the way it gets onto a student's laptop has changed.
 
-- **Mattia Beltrami**, Politecnico di Milano
-- **Matteo Impieri**, Politecnico di Milano
-- **Filippo Difronzo**, Politecnico di Milano
-- **Luca Feggi**, Università di Padova
+- **[Mattia Beltrami](https://www.linkedin.com/in/mattia-beltrami/)**, Politecnico di Milano
+- **[Matteo Impieri](https://www.linkedin.com/in/matteo-impieri-5b5874331/)**, Politecnico di Milano
+- **[Filippo Difronzo](https://www.linkedin.com/in/filippo-difronzo-3a56701b1/)**, Politecnico di Milano
+- **[Luca Feggi](https://www.linkedin.com/in/luca-feggi-a643133b5/)**, Università di Padova
 
 ## Notice
 
@@ -178,4 +182,4 @@ Your use of OpenAI's models through Get It. is subject to OpenAI's own [Terms of
 
 ## License
 
-Apache License 2.0. See [`LICENSE`](LICENSE). Source is open. Contributions are welcome.
+Apache License 2.0. See [`LICENSE`](LICENSE). Source is open. Contributions are welcome: see [`CONTRIBUTING.md`](CONTRIBUTING.md) and join us on [Discord](https://discord.gg/DpQPswRhsK).

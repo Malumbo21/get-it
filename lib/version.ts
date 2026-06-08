@@ -19,9 +19,27 @@ export const GITHUB_RELEASES_URL = `${GITHUB_URL}/releases`;
 
 export const FEEDBACK_EMAIL = "beltromatti@gmail.com";
 
+export const DISCORD_URL = "https://discord.gg/DpQPswRhsK";
+
 export const TEAM = [
-  { name: "Mattia Beltrami", affiliation: "Politecnico di Milano" },
-  { name: "Matteo Impieri", affiliation: "Politecnico di Milano" },
-  { name: "Filippo Difronzo", affiliation: "Politecnico di Milano" },
-  { name: "Luca Feggi", affiliation: "Università di Padova" },
+  {
+    name: "Mattia Beltrami",
+    affiliation: "Politecnico di Milano",
+    linkedin: "https://www.linkedin.com/in/mattia-beltrami/",
+  },
+  {
+    name: "Matteo Impieri",
+    affiliation: "Politecnico di Milano",
+    linkedin: "https://www.linkedin.com/in/matteo-impieri-5b5874331/",
+  },
+  {
+    name: "Filippo Difronzo",
+    affiliation: "Politecnico di Milano",
+    linkedin: "https://www.linkedin.com/in/filippo-difronzo-3a56701b1/",
+  },
+  {
+    name: "Luca Feggi",
+    affiliation: "Università di Padova",
+    linkedin: "https://www.linkedin.com/in/luca-feggi-a643133b5/",
+  },
 ] as const;
