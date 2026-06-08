@@ -19,17 +19,34 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, KeyRound, Clock, Loader2, X } from "lucide-react";
+import {
+  AlertTriangle,
+  KeyRound,
+  Clock,
+  Loader2,
+  Download,
+  X,
+} from "lucide-react";
 
 type Health = {
   ok: boolean;
-  kind: "auth_lost" | "rate_limit" | "binary_missing" | "generic" | null;
+  kind:
+    | "auth_lost"
+    | "rate_limit"
+    | "binary_missing"
+    | "model_unsupported"
+    | "generic"
+    | null;
   message: string | null;
   retryAt: number | null;
   window: "5h" | "weekly" | "unknown" | null;
   serial: number;
   lastOkAt: number | null;
 };
+
+// Human-facing download page — always points at the newest published build.
+const LATEST_RELEASE_URL =
+  "https://github.com/beltromatti/get-it/releases/latest";
 
 declare global {
   interface Window {
@@ -139,6 +156,23 @@ export default function CodexHealthBanner() {
         Re-connect
       </button>
     );
+  } else if (view.kind === "model_unsupported") {
+    icon = <Download className="h-4 w-4 text-rose-600" />;
+    title = "Get It needs an update";
+    body =
+      "The AI model this version uses is no longer available. Download the " +
+      "latest version of Get It to keep the generative features working — " +
+      "your data is safe.";
+    action = (
+      <button
+        type="button"
+        onClick={() => window.open(LATEST_RELEASE_URL, "_blank")}
+        className="inline-flex items-center gap-1.5 rounded-md bg-rose-600 px-3 py-1 text-[12px] font-semibold text-white shadow-sm transition hover:bg-rose-700"
+      >
+        <Download className="h-3 w-3" />
+        Get the latest version
+      </button>
+    );
   } else if (view.kind === "rate_limit") {
     icon = <Clock className="h-4 w-4 text-amber-600" />;
     const win =
@@ -169,7 +203,9 @@ export default function CodexHealthBanner() {
   }
 
   const palette =
-    view.kind === "auth_lost" || view.kind === "binary_missing"
+    view.kind === "auth_lost" ||
+    view.kind === "binary_missing" ||
+    view.kind === "model_unsupported"
       ? "border-rose-200 bg-rose-50 text-rose-900"
       : "border-amber-200 bg-amber-50 text-amber-900";
 

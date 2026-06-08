@@ -19,6 +19,27 @@ import { Codex } from "@openai/codex-sdk";
 import type { ThreadOptions } from "@openai/codex-sdk";
 import { CODEX_SCRATCH_DIR } from "./paths";
 
+/**
+ * The model every generative call runs on, pinned explicitly.
+ *
+ * Why pin it: the SDK only passes `--model` to the codex binary when we set
+ * this option. If we leave it unset, the binary resolves the model itself —
+ * first from the user's personal `~/.codex/config.toml`, then from a default
+ * baked into the bundled binary. That bundled default is a now-retired model
+ * (`gpt-5.3-codex`), which OpenAI rejects for ChatGPT-account auth with a 400
+ * ("model is not supported when using Codex with a ChatGPT account"). It only
+ * appeared to work for developers because their local `config.toml` happened
+ * to override the default with a current model; users with a clean `~/.codex`
+ * fell through to the dead default. Pinning here makes every install — across
+ * OS, arch, and environment — deterministically use the same supported model,
+ * independent of the binary's default and of any local config.
+ *
+ * Keep this current with the models available to ChatGPT-account auth. When
+ * OpenAI retires it, ship an app update bumping this value (the in-app
+ * "model unsupported" banner tells users exactly that).
+ */
+export const CODEX_MODEL = "gpt-5.5";
+
 let _codex: Codex | null = null;
 
 function getCodex(): Codex {
@@ -48,6 +69,7 @@ export type RunOptions = {
 
 function threadOptions(opts: RunOptions = {}): ThreadOptions {
   return {
+    model: CODEX_MODEL,
     sandboxMode: "read-only",
     approvalPolicy: "never",
     skipGitRepoCheck: true,
@@ -82,6 +104,7 @@ export type CodexErrorKind =
   | "auth_lost" // user is not logged in (or token revoked)
   | "rate_limit" // hit the 5h or weekly window
   | "binary_missing" // the codex binary itself can't be found
+  | "model_unsupported" // the pinned model was retired server-side → update the app
   | "generic";
 
 export class CodexError extends Error {
@@ -201,6 +224,12 @@ const RX_TRY_AGAIN_MIN = /try again in\s*(\d+(?:\.\d+)?)\s*(m|mins?|minutes?)/i;
 const RX_TRY_AGAIN_HOUR = /try again in\s*(\d+(?:\.\d+)?)\s*(h|hrs?|hours?)/i;
 const RX_AUTH = /(not logged in|please.*log ?in|unauthori[sz]ed|401|invalid api key|token (?:has )?expired|sign in)/i;
 const RX_BINARY = /(unable to locate codex|cannot find module|enoent.*codex|codex.*not found|spawn .* enoent)/i;
+// OpenAI rejects a retired/unavailable model for ChatGPT-account auth, e.g.
+// "The 'gpt-5.3-codex' model is not supported when using Codex with a ChatGPT
+// account." This means the model this build pins has aged out server-side and
+// the user needs a newer Get It. Matched before the generic catch-all.
+const RX_MODEL_UNSUPPORTED =
+  /model is not supported|is not supported when using codex|model_not_found|(?:unknown|unsupported|deprecated|retired) model|model.{0,20}(?:is )?(?:no longer|not) (?:available|supported)/i;
 const RX_WEEKLY = /\bweekly\b/i;
 const RX_FIVE_H = /\b(5\s*h|5\s*hour|five hour)\b/i;
 
@@ -218,6 +247,12 @@ export function classifyCodexError(err: unknown): CodexError {
 
   if (RX_AUTH.test(msg)) {
     return new CodexError("auth_lost", msg);
+  }
+
+  if (RX_MODEL_UNSUPPORTED.test(msg)) {
+    // Preserve the original detail (which model the server refused) so logs
+    // stay diagnosable; the banner shows its own user-facing copy by kind.
+    return new CodexError("model_unsupported", msg);
   }
 
   if (RX_RATE_LIMIT.test(msg)) {
