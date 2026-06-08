@@ -28,6 +28,7 @@ import {
   ChevronDown,
   MoreHorizontal,
   Download,
+  RefreshCw,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -114,6 +115,7 @@ type Props = {
     loadingDetail?: string;
     onRuntimeError?: (msg: string) => void;
     activeTagError?: string | null;
+    onRetry?: () => void;
   };
 };
 
@@ -168,8 +170,17 @@ export default function RightPane({ docId, mode, onModeChange, visualizer }: Pro
         </footer>
       )}
       {mode === "visualizer" && visualizer.activeTagError && (
-        <div className="shrink-0 border-t border-amber-200 bg-amber-50 px-5 py-3 text-[12px] text-amber-800">
-          {visualizer.activeTagError}
+        <div className="flex shrink-0 items-start justify-between gap-3 border-t border-amber-200 bg-amber-50 px-5 py-3">
+          <p className="text-[12px] text-amber-800">{visualizer.activeTagError}</p>
+          {visualizer.onRetry && (
+            <button
+              type="button"
+              onClick={visualizer.onRetry}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-amber-300 bg-white px-2.5 py-1 text-[12px] font-medium text-amber-800 transition hover:bg-amber-100"
+            >
+              <RefreshCw className="h-3 w-3" /> Retry
+            </button>
+          )}
         </div>
       )}
     </div>

@@ -92,7 +92,6 @@ function mergeTagsFile(
 // ── Detection job ───────────────────────────────────────────────────────
 
 const detectionInFlight = new Map<string, Promise<void>>();
-const detectionRetryTimer = new Map<string, NodeJS.Timeout>();
 
 export function isDetectionRunning(docId: string): boolean {
   return detectionInFlight.has(docId);
@@ -100,12 +99,6 @@ export function isDetectionRunning(docId: string): boolean {
 
 export function ensureDetection(docId: string): void {
   if (detectionInFlight.has(docId)) return;
-  // Clear any pending retry timer — we're starting now.
-  const t = detectionRetryTimer.get(docId);
-  if (t) {
-    clearTimeout(t);
-    detectionRetryTimer.delete(docId);
-  }
   const p = runDetection(docId)
     .catch((e) =>
       console.warn("[jobs/detect]", docId, e instanceof Error ? e.message : e),
@@ -124,11 +117,14 @@ async function runDetection(docId: string) {
   const autoGenerate = settings.autoGenerate;
 
   const inFlightPages = new Set<number>();
-  // Per-page generic-failure counter (rate-limit doesn't count). A page that
-  // keeps failing is given up on (marked analyzed) once it hits the cap so
-  // the job can never spin forever.
+  // Per-page generic-failure counter (a backend Codex error doesn't count). A
+  // page that keeps failing is given up on (marked analyzed) once it hits the
+  // cap so the job can never spin forever.
   const attempts = new Map<number, number>();
-  let rateLimitedRetryAt: number | null = null;
+  // Any account-level Codex error (rate-limit / auth / binary / unsupported
+  // model) stops detection immediately. We do NOT auto-retry: the health
+  // banner explains why, and detection resumes on its own the next time the
+  // doc is opened (the bootstrap re-kicks it and analyzed pages are skipped).
   let terminalCodexError: CodexError | null = null;
 
   // Grab the next batch of pages still needing a pass. Read fresh each tick so
@@ -157,7 +153,7 @@ async function runDetection(docId: string) {
 
     const pump = () => {
       while (active < DETECTION_CONCURRENCY) {
-        if (rateLimitedRetryAt || terminalCodexError) {
+        if (terminalCodexError) {
           finish();
           return;
         }
@@ -170,12 +166,9 @@ async function runDetection(docId: string) {
         active++;
         analyzeBatch(docId, batch, autoGenerate)
           .catch((e) => {
-            if (e instanceof CodexError && e.kind === "rate_limit" && e.retryAt) {
-              rateLimitedRetryAt = e.retryAt;
-            } else if (
-              e instanceof CodexError &&
-              (e.kind === "binary_missing" || e.kind === "auth_lost")
-            ) {
+            if (e instanceof CodexError && e.kind !== "generic") {
+              // Account-level error (rate-limit / auth / binary / unsupported
+              // model): stop the whole job. No auto-retry.
               terminalCodexError = e;
             } else {
               // Generic failure: count it against every page in the batch and
@@ -198,7 +191,7 @@ async function runDetection(docId: string) {
           .finally(() => {
             for (const p of batch) inFlightPages.delete(p);
             active--;
-            if (rateLimitedRetryAt || terminalCodexError) {
+            if (terminalCodexError) {
               finish();
               return;
             }
@@ -210,17 +203,10 @@ async function runDetection(docId: string) {
     pump();
   });
 
+  // Surface the terminal error so ensureDetection logs it; the health mailbox
+  // already carries it for the banner. We never schedule an auto-retry.
   if (terminalCodexError) {
     throw terminalCodexError;
-  }
-
-  if (rateLimitedRetryAt) {
-    const wait = Math.max(1000, rateLimitedRetryAt - Date.now() + 500);
-    const t = setTimeout(() => {
-      detectionRetryTimer.delete(docId);
-      ensureDetection(docId);
-    }, wait);
-    detectionRetryTimer.set(docId, t);
   }
 }
 
@@ -315,19 +301,29 @@ function appendDetectionResult(
 // ── Viz queue ───────────────────────────────────────────────────────────
 
 const vizInFlight = new Map<string, Promise<void>>();
-const vizRetryTimer = new Map<string, NodeJS.Timeout>();
 
 export function isVizQueueRunning(docId: string): boolean {
   return vizInFlight.has(docId);
 }
 
+/**
+ * Drop the `generating` spinner from every tag still waiting on the queue,
+ * returning them to an idle, click-to-retry state. Tags that already have a
+ * spec (done) or a per-concept `error` are left untouched. Called when the
+ * queue stops on an account-level Codex error so the viewer never shows a
+ * spinner that will never resolve.
+ */
+function clearPendingVizGeneration(docId: string): void {
+  mergeTagsFile(docId, (file) => ({
+    ...file,
+    tags: file.tags.map((t) =>
+      t.generating && !t.spec ? { ...t, generating: false } : t,
+    ),
+  }));
+}
+
 export function ensureVizQueue(docId: string): void {
   if (vizInFlight.has(docId)) return;
-  const t = vizRetryTimer.get(docId);
-  if (t) {
-    clearTimeout(t);
-    vizRetryTimer.delete(docId);
-  }
   const p = runVizQueue(docId)
     .catch((e) =>
       console.warn("[jobs/viz]", docId, e instanceof Error ? e.message : e),
@@ -383,7 +379,12 @@ async function runVizQueue(docId: string) {
   const doc = getDoc(docId);
   if (!doc) return;
   const docTitle = docTitleFromFilename(doc.filename);
-  let rateLimitedRetryAt: number | null = null;
+  // Set when a call fails with an account-level Codex error (rate-limit / auth
+  // / binary / unsupported model). Those hit every call, so we stop the whole
+  // queue rather than march through the rest re-hitting the same wall — that
+  // was the old infinite-retry loop. No auto-retry: the user re-clicks a tag
+  // to try again once the banner clears.
+  let stopError: CodexError | null = null;
   const inFlightTagIds = new Set<string>();
 
   const pickNextTag = (): PersistedTagServer | null => {
@@ -399,23 +400,36 @@ async function runVizQueue(docId: string) {
     let active = 0;
     let done = false;
 
+    const finish = () => {
+      if (active === 0 && !done) {
+        done = true;
+        resolve();
+      }
+    };
+
     const pump = () => {
       while (active < VIZ_CONCURRENCY) {
+        if (stopError) {
+          finish();
+          return;
+        }
         const tag = pickNextTag();
         if (!tag) {
-          if (active === 0 && !done) {
-            done = true;
-            resolve();
-          }
+          finish();
           return;
         }
         inFlightTagIds.add(tag.id);
         active++;
         processViz(docId, tag.id, docTitle)
           .catch((e) => {
-            if (e instanceof CodexError && e.kind === "rate_limit" && e.retryAt) {
-              rateLimitedRetryAt = e.retryAt;
+            if (e instanceof CodexError && e.kind !== "generic") {
+              // Account-level failure: stop the queue. processViz left the
+              // tag's `generating` flag in place (it didn't mark a per-tag
+              // error), so we clear all pending spinners below.
+              stopError = e;
             } else {
+              // Generic per-concept failure is already recorded on the tag by
+              // processViz (so it won't be re-picked); just log and move on.
               console.warn(
                 "[jobs/viz-tag]",
                 docId,
@@ -427,11 +441,8 @@ async function runVizQueue(docId: string) {
           .finally(() => {
             inFlightTagIds.delete(tag.id);
             active--;
-            if (rateLimitedRetryAt) {
-              if (active === 0 && !done) {
-                done = true;
-                resolve();
-              }
+            if (stopError) {
+              finish();
               return;
             }
             pump();
@@ -442,13 +453,10 @@ async function runVizQueue(docId: string) {
     pump();
   });
 
-  if (rateLimitedRetryAt) {
-    const wait = Math.max(1000, rateLimitedRetryAt - Date.now() + 500);
-    const t = setTimeout(() => {
-      vizRetryTimer.delete(docId);
-      ensureVizQueue(docId);
-    }, wait);
-    vizRetryTimer.set(docId, t);
+  // Account-level stop: clear the spinner from every tag still queued so the
+  // viewer shows them as idle/click-to-retry instead of spinning forever.
+  if (stopError) {
+    clearPendingVizGeneration(docId);
   }
 }
 
@@ -490,8 +498,11 @@ async function processViz(docId: string, tagId: string, docTitle: string) {
       ),
     }));
   } catch (e) {
-    if (e instanceof CodexError && e.kind === "rate_limit") {
-      // Re-throw so the queue runner can pick up the retryAt timer.
+    if (e instanceof CodexError && e.kind !== "generic") {
+      // Account-level failure (rate-limit / auth / binary / unsupported
+      // model). Don't pin it on this concept — re-throw so the queue stops
+      // and clears every pending spinner. The tag stays `generating` so the
+      // queue-level cleanup returns it to an idle, click-to-retry state.
       throw e;
     }
     const msg = e instanceof Error ? e.message : "viz generation failed";

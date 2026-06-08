@@ -95,8 +95,8 @@ export default function FeynmanView({ docId }: Props) {
         body: JSON.stringify({ action: "start", topic: t }),
       });
       if (!r.ok) {
-        const txt = await r.text().catch(() => "");
-        throw new Error(`start failed (${r.status}): ${txt.slice(0, 120)}`);
+        const j = (await r.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(j?.error || `Couldn't start the session (${r.status}).`);
       }
       const j = (await r.json()) as StartResp;
       setSessions((prev) => [j.session, ...(prev ?? [])]);
@@ -121,6 +121,7 @@ export default function FeynmanView({ docId }: Props) {
       setError(null);
       const sessionId = active.id;
       const usedPrompt = pendingChildPrompt;
+      const optimisticTs = Date.now();
       setSessions((prev) =>
         prev
           ? prev.map((s) =>
@@ -129,7 +130,7 @@ export default function FeynmanView({ docId }: Props) {
                     ...s,
                     turns: [
                       ...s.turns,
-                      { childPrompt: usedPrompt, userExplanation: trimmed, ts: Date.now() },
+                      { childPrompt: usedPrompt, userExplanation: trimmed, ts: optimisticTs },
                     ],
                   }
                 : s,
@@ -150,8 +151,8 @@ export default function FeynmanView({ docId }: Props) {
           }),
         });
         if (!r.ok) {
-          const txt = await r.text().catch(() => "");
-          throw new Error(`explain failed (${r.status}): ${txt.slice(0, 120)}`);
+          const j = (await r.json().catch(() => null)) as { error?: string } | null;
+          throw new Error(j?.error || `Couldn't continue the session (${r.status}).`);
         }
         const j = (await r.json()) as ExplainResp;
         setSessions((prev) =>
@@ -164,6 +165,20 @@ export default function FeynmanView({ docId }: Props) {
           setPendingBySession((prev) => ({ ...prev, [sessionId]: j.childPrompt }));
         }
       } catch (e) {
+        // The server didn't persist this turn (it commits only after codex
+        // succeeds), so roll the optimistic turn back and restore the prompt
+        // the student was answering — they can re-submit to retry cleanly.
+        setSessions((prev) =>
+          prev
+            ? prev.map((s) =>
+                s.id === sessionId
+                  ? { ...s, turns: s.turns.filter((t) => t.ts !== optimisticTs) }
+                  : s,
+              )
+            : prev,
+        );
+        setPendingChildPrompt(usedPrompt);
+        setPendingBySession((prev) => ({ ...prev, [sessionId]: usedPrompt }));
         setError((e as Error).message);
       } finally {
         setBusy(false);
@@ -238,7 +253,19 @@ export default function FeynmanView({ docId }: Props) {
               </>
             )}
           </button>
-          {error && <p className="mt-2 text-[11px] leading-relaxed text-rose-700">{error}</p>}
+          {!active && error && (
+            <div className="mt-2">
+              <p className="text-[11px] leading-relaxed text-rose-700">{error}</p>
+              <button
+                type="button"
+                onClick={start}
+                disabled={busy}
+                className="mt-1.5 inline-flex items-center gap-1.5 rounded-md border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-medium text-rose-700 transition hover:bg-rose-100 disabled:opacity-50"
+              >
+                <RefreshCw className="h-3 w-3" /> Retry
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center justify-between px-2 pb-1 text-[10.5px] font-semibold uppercase tracking-wider text-[var(--ink-500)]">
@@ -259,6 +286,7 @@ export default function FeynmanView({ docId }: Props) {
                 maxTurns={maxTurns}
                 onSelect={() => {
                   setActiveId(s.id);
+                  setError(null);
                   setPendingChildPrompt(s.endedAt ? null : pendingBySession[s.id] ?? null);
                 }}
                 onDelete={() => deleteSession(s.id)}
@@ -281,6 +309,7 @@ export default function FeynmanView({ docId }: Props) {
             busy={busy}
             onSubmit={submitExplanation}
             maxTurns={maxTurns}
+            error={error}
           />
         )}
       </section>
@@ -363,12 +392,14 @@ function ActiveSession({
   busy,
   onSubmit,
   maxTurns,
+  error,
 }: {
   session: FeynmanSession;
   pendingChildPrompt: string | null;
   busy: boolean;
   onSubmit: (text: string) => void;
   maxTurns: number;
+  error: string | null;
 }) {
   const ended = session.endedAt != null;
   const progress = Math.min(100, (session.turns.length / Math.max(1, maxTurns)) * 100);
@@ -405,12 +436,19 @@ function ActiveSession({
           </div>
         </div>
       ) : (
-        <VoiceConsole
-          prompt={pendingChildPrompt}
-          busy={busy}
-          turnIndex={session.turns.length}
-          onSubmit={onSubmit}
-        />
+        <>
+          {error && (
+            <p className="shrink-0 border-b border-rose-100 bg-rose-50 px-5 py-2 text-[11.5px] leading-relaxed text-rose-700">
+              {error} Your turn was kept — say or type it again to retry.
+            </p>
+          )}
+          <VoiceConsole
+            prompt={pendingChildPrompt}
+            busy={busy}
+            turnIndex={session.turns.length}
+            onSubmit={onSubmit}
+          />
+        </>
       )}
     </div>
   );

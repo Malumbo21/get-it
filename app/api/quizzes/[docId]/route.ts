@@ -19,7 +19,7 @@
 
 import { NextResponse } from "next/server";
 import { randomInt } from "node:crypto";
-import { runJson } from "@/lib/codex";
+import { runJson, toCodexErrorPayload } from "@/lib/codex";
 import { getDoc } from "@/lib/store";
 import {
   loadWorkContext,
@@ -139,11 +139,17 @@ export async function POST(
 
   if (body.action === "generate") {
     const topic = (body.topic ?? "all").trim() || "all";
-    const { data } = await runJson<QuizGenerateResult>(
-      generationPrompt(docId, topic),
-      quizGenerateSchema,
-      { reasoning: "low" },
-    );
+    let data: QuizGenerateResult;
+    try {
+      ({ data } = await runJson<QuizGenerateResult>(
+        generationPrompt(docId, topic),
+        quizGenerateSchema,
+        { reasoning: "low" },
+      ));
+    } catch (e) {
+      const p = toCodexErrorPayload(e);
+      return NextResponse.json({ error: p.message, kind: p.kind }, { status: 503 });
+    }
     // Defensive clamp: in case the model emits a stray correctIndex
     // outside 0..3 we treat the first option as correct rather than
     // throwing — the JSON Schema already enforces bounds but the

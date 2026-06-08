@@ -301,11 +301,13 @@ export default function ViewerClient({ docId }: { docId: string }) {
       setRightPaneMode("visualizer");
       const tag = tags.find((t) => t.id === id);
       if (!tag) return;
-      if (tag.spec || tag.generating || tag.error) return;
-      // Optimistic: mark generating right away so the spinner shows
-      // without waiting for the next poll tick.
+      if (tag.generating) return; // already in flight — don't double-queue
+      if (tag.spec && !tag.error) return; // already rendered — selecting is enough
+      // Idle OR previously failed → (re)generate. Clearing any error optimistically
+      // marks it generating so the spinner shows at once; this is also the manual
+      // retry path after a backend Codex error left the tag idle/errored.
       setTags((prev) =>
-        prev.map((t) => (t.id === id ? { ...t, generating: true } : t)),
+        prev.map((t) => (t.id === id ? { ...t, generating: true, error: undefined } : t)),
       );
       void fetch(`/api/jobs/viz/${docId}`, {
         method: "POST",
@@ -478,13 +480,14 @@ export default function ViewerClient({ docId }: { docId: string }) {
                 ? (msg) => handleRuntimeError(activeTag.id, msg)
                 : undefined,
               emptyHint: activeTag?.error
-                ? "We weren't able to build a working visualization for this concept. Pick another tag — most of them work cleanly."
+                ? "We weren't able to build a working visualization for this concept. Retry below, or pick another tag — most of them work cleanly."
                 : tags.length === 0
                   ? "codex is reading the document — tags will appear inline as soon as they're detected."
                   : autoGenerate
                     ? "Click any colored tag in the document to render its concept here."
                     : "Click any tag to generate its visualization. (manual mode — toggle auto-generate in settings)",
               activeTagError: activeTag?.error ?? null,
+              onRetry: activeTag ? () => handleTagClick(activeTag.id) : undefined,
             }}
           />
         </div>

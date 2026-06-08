@@ -22,6 +22,14 @@ export default function ChatView({ docId }: Props) {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [creating, setCreating] = useState(false);
+  // The last turn that failed to get a reply, scoped to its chat. The user
+  // message is kept visible in the thread; this drives an inline "couldn't
+  // reach Codex — Retry" row beneath it. Sending never auto-retries.
+  const [failed, setFailed] = useState<{
+    chatId: string;
+    message: string;
+    error: string;
+  } | null>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
 
   // Initial fetch + handle prefill from a "Chat about this concept" jump
@@ -98,6 +106,44 @@ export default function ChatView({ docId }: Props) {
     [docId, activeId],
   );
 
+  // Ship one turn to the server and fold the result back in. On success the
+  // server returns the full chat (user message + reply, committed together),
+  // so we replace local state with it — the optimistic user bubble is reconciled
+  // with no duplicate. On failure we record `failed` (no auto-retry) so the
+  // thread shows a manual Retry control. Used by both a fresh send and Retry.
+  const deliver = useCallback(
+    async (chatId: string, message: string) => {
+      setSending(true);
+      setFailed(null);
+      try {
+        const r = await fetch(`/api/chat/${docId}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "send", chatId, message }),
+        });
+        if (!r.ok) {
+          const txt = await r.text().catch(() => "");
+          throw new Error(`reply failed (${r.status})${txt ? `: ${txt.slice(0, 120)}` : ""}`);
+        }
+        const j = (await r.json()) as { chat: ChatThread };
+        setChats((prev) =>
+          prev ? prev.map((c) => (c.id === chatId ? j.chat : c)) : prev,
+        );
+        // Tell the viewer a reply landed. It batches a single knowledge-graph
+        // evaluation when the student leaves the Chat tab, instead of one per
+        // message.
+        window.dispatchEvent(
+          new CustomEvent("getit:chat-sent", { detail: { docId } }),
+        );
+      } catch (e) {
+        setFailed({ chatId, message, error: (e as Error).message });
+      } finally {
+        setSending(false);
+      }
+    },
+    [docId],
+  );
+
   const send = useCallback(async () => {
     const message = draft.trim();
     if (!message || sending) return;
@@ -130,49 +176,15 @@ export default function ChatView({ docId }: Props) {
         : prev,
     );
     setDraft("");
-    setSending(true);
-    try {
-      const r = await fetch(`/api/chat/${docId}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "send", chatId, message }),
-      });
-      if (!r.ok) throw new Error(`send failed (${r.status})`);
-      const j = (await r.json()) as { chat: ChatThread };
-      setChats((prev) =>
-        prev ? prev.map((c) => (c.id === chatId ? j.chat : c)) : prev,
-      );
-      // Tell the viewer a reply landed. It batches a single knowledge-graph
-      // evaluation when the student leaves the Chat tab, instead of one per
-      // message.
-      window.dispatchEvent(
-        new CustomEvent("getit:chat-sent", { detail: { docId } }),
-      );
-    } catch (e) {
-      // Roll back optimistic and surface a placeholder system message.
-      setChats((prev) =>
-        prev
-          ? prev.map((c) =>
-              c.id === chatId
-                ? {
-                    ...c,
-                    messages: [
-                      ...c.messages,
-                      {
-                        role: "assistant" as const,
-                        content: `(reply failed — ${(e as Error).message})`,
-                        ts: Date.now(),
-                      },
-                    ],
-                  }
-                : c,
-            )
-          : prev,
-      );
-    } finally {
-      setSending(false);
-    }
-  }, [activeId, docId, draft, sending]);
+    await deliver(chatId, message);
+  }, [activeId, docId, draft, sending, deliver]);
+
+  // Re-send the last failed turn. Its user bubble is already in the thread, so
+  // we just re-deliver — no second optimistic append, no duplicate.
+  const retry = useCallback(() => {
+    if (!failed || sending) return;
+    void deliver(failed.chatId, failed.message);
+  }, [failed, sending, deliver]);
 
   if (chats === null) {
     return (
@@ -255,6 +267,20 @@ export default function ChatView({ docId }: Props) {
             ))}
             {sending && (
               <Bubble role="assistant" content="…" pulsing />
+            )}
+            {failed && failed.chatId === active.id && !sending && (
+              <div className="mb-3 flex flex-col items-start gap-1.5">
+                <p className="text-[11.5px] leading-relaxed text-rose-700">
+                  Couldn&apos;t get a reply — {failed.error}
+                </p>
+                <button
+                  type="button"
+                  onClick={retry}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-rose-200 bg-rose-50 px-2.5 py-1 text-[12px] font-medium text-rose-700 transition hover:bg-rose-100"
+                >
+                  <RefreshCw className="h-3 w-3" /> Retry
+                </button>
+              </div>
             )}
           </div>
         )}

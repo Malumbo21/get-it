@@ -16,7 +16,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { runJson } from "@/lib/codex";
+import { runJson, toCodexErrorPayload } from "@/lib/codex";
 import { getDoc } from "@/lib/store";
 import {
   loadWorkContext,
@@ -191,7 +191,13 @@ export async function POST(
       createdAt: Date.now(),
       turns: [],
     };
-    const childPrompt = await nextChildPrompt(docId, session);
+    let childPrompt: string;
+    try {
+      childPrompt = await nextChildPrompt(docId, session);
+    } catch (e) {
+      const p = toCodexErrorPayload(e);
+      return NextResponse.json({ error: p.message, kind: p.kind }, { status: 503 });
+    }
     // Persist the open-question turn placeholder by stashing the prompt on
     // the session object — we'll merge it with the user reply when it lands.
     const wc = loadWorkContext(docId);
@@ -232,15 +238,25 @@ export async function POST(
       );
     }
 
-    session.turns.push({
-      childPrompt,
-      userExplanation,
-      ts: Date.now(),
-    });
+    // Build the would-be turn in memory only. We persist it (and any model
+    // output) ONLY after the codex call succeeds, so a failed turn leaves the
+    // session untouched on disk and the client can re-submit to retry without
+    // duplicating the turn.
+    const pendingTurns = [
+      ...session.turns,
+      { childPrompt, userExplanation, ts: Date.now() },
+    ];
 
-    if (session.turns.length >= MAX_TURNS) {
-      // End of session.
-      const summary = await endingSummary(docId, session);
+    if (pendingTurns.length >= MAX_TURNS) {
+      // End of session — generate the summary, then commit.
+      let summary: string;
+      try {
+        summary = await endingSummary(docId, { ...session, turns: pendingTurns });
+      } catch (e) {
+        const p = toCodexErrorPayload(e);
+        return NextResponse.json({ error: p.message, kind: p.kind }, { status: 503 });
+      }
+      session.turns = pendingTurns;
       session.summary = summary;
       session.endedAt = Date.now();
       saveWorkContext(wc);
@@ -248,8 +264,15 @@ export async function POST(
       return NextResponse.json({ session, done: true, summary, maxTurns: MAX_TURNS });
     }
 
+    let next: string;
+    try {
+      next = await nextChildPrompt(docId, { ...session, turns: pendingTurns });
+    } catch (e) {
+      const p = toCodexErrorPayload(e);
+      return NextResponse.json({ error: p.message, kind: p.kind }, { status: 503 });
+    }
+    session.turns = pendingTurns;
     saveWorkContext(wc);
-    const next = await nextChildPrompt(docId, session);
     return NextResponse.json({ session, childPrompt: next, done: false, maxTurns: MAX_TURNS });
   }
 

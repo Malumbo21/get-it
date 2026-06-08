@@ -121,13 +121,12 @@ export async function POST(
     if (!message) return NextResponse.json({ error: "empty message" }, { status: 400 });
 
     const userMsg: ChatMessage = { role: "user", content: message, ts: Date.now() };
-    chat.messages.push(userMsg);
-    chat.updatedAt = userMsg.ts;
-    // First user message becomes the chat title if not already set.
-    if (chat.title === "New chat" && chat.messages.length === 1) {
-      chat.title = message.slice(0, 60);
-    }
-    saveWorkContext(wc);
+    // History to send the model with the new turn appended — but NOT yet
+    // persisted. We commit the user message and the reply together only after
+    // the codex call succeeds (below), so a failed turn leaves no orphan user
+    // message on disk and the client can re-send to retry without duplicating
+    // it.
+    const messagesForPrompt = [...chat.messages, userMsg];
 
     // The new turn the student just typed — all that needs to go over the
     // wire when resuming an existing Codex thread.
@@ -163,7 +162,7 @@ export async function POST(
     // conversation so far. Stable prefix first, the latest turn last.
     if (!reply) {
       const fullInput = `${SYSTEM}\n\n${docContext(docId)}\n\n--- CONVERSATION SO FAR ---\n${renderHistory(
-        chat.messages,
+        messagesForPrompt,
       )}\n\n--- ASSISTANT REPLY ---\nReply now as ASSISTANT. Output JSON.`;
       const { data, threadId } = await runJsonInThread<ChatReplyResult>({
         outputSchema: chatReplySchema,
@@ -174,6 +173,7 @@ export async function POST(
       codexThreadId = threadId;
     }
 
+    // Codex succeeded — commit the user turn and the reply atomically.
     const reloaded = loadWorkContext(docId);
     const liveChat = reloaded.chats.find((c) => c.id === chat.id);
     if (!liveChat) return NextResponse.json({ error: "chat vanished" }, { status: 500 });
@@ -182,7 +182,11 @@ export async function POST(
       content: reply.reply,
       ts: Date.now(),
     };
-    liveChat.messages.push(assistantMsg);
+    // First user message becomes the chat title if still unnamed.
+    if (liveChat.title === "New chat" && liveChat.messages.length === 0) {
+      liveChat.title = message.slice(0, 60);
+    }
+    liveChat.messages.push(userMsg, assistantMsg);
     liveChat.updatedAt = assistantMsg.ts;
     if (codexThreadId) liveChat.codexThreadId = codexThreadId;
     saveWorkContext(reloaded);
